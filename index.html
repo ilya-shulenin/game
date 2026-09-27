@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>РЕТРО ГОНКИ 80-х</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body{
+    width:100%; height:100%; overflow:hidden;
+    background:#000; touch-action:none;
+    font-family:'Courier New', monospace;
+    -webkit-user-select:none; user-select:none;
+  }
+  #game-container{
+    position:relative; width:100%; height:100%;
+    display:flex; justify-content:center; align-items:center;
+    background:#0a0a12;
+  }
+  canvas{
+    display:block;
+    image-rendering:pixelated;
+    background:#111;
+    box-shadow:0 0 40px rgba(255,60,60,.35);
+  }
+  /* ---------- HUD ---------- */
+  #hud{
+    position:absolute; top:0; left:0; width:100%;
+    display:flex; justify-content:space-between; align-items:flex-start;
+    padding:10px 16px; pointer-events:none; color:#fff;
+    text-shadow:2px 2px 0 #000; z-index:5;
+  }
+  .hud-box{ background:rgba(0,0,0,.55); border:3px solid #ffcc00;
+    padding:6px 12px; border-radius:6px; font-weight:bold; }
+  .fuel-wrap{ min-width:170px; }
+  .fuel-label{ font-size:14px; letter-spacing:2px; color:#ffdd55; margin-bottom:4px;}
+  .fuel-bar-bg{ width:100%; height:16px; background:#330000; border:2px solid #fff; }
+  #fuel-bar{ height:100%; width:100%; background:linear-gradient(90deg,#ff3b3b,#ffb300,#3bff6e); transition:width .15s linear;}
+  #dist-text{ font-size:18px; color:#7dfcff; }
+  #speed-text{ font-size:12px; color:#ff9d5c; margin-top:4px;}
+  /* ---------- Touch buttons ---------- */
+  #controls{
+    position:absolute; bottom:0; left:0; width:100%;
+    display:flex; justify-content:space-between; padding:0 20px 22px;
+    pointer-events:none; z-index:6;
+  }
+  .tbtn{
+    pointer-events:auto;
+    width:150px; height:110px;
+    border:5px solid #ffcc00; border-radius:18px;
+    background:linear-gradient(180deg,#e83b3b,#8f1414);
+    box-shadow:0 6px 0 #4d0808, inset 0 4px 0 rgba(255,255,255,.25);
+    display:flex; align-items:center; justify-content:center;
+    color:#fff; font-size:56px; font-weight:bold;
+    text-shadow:3px 3px 0 #000;
+    transition:transform .05s;
+  }
+  .tbtn:active,.tbtn.pressed{ transform:translateY(5px); box-shadow:0 1px 0 #4d0808, inset 0 4px 0 rgba(255,255,255,.25); }
+  /* ---------- Overlays ---------- */
+  .overlay{
+    position:absolute; inset:0; z-index:10;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:rgba(0,0,10,.82); color:#fff; text-align:center; padding:20px;
+  }
+  .overlay h1{
+    font-size:52px; letter-spacing:4px; color:#ffdd33;
+    text-shadow:4px 4px 0 #c1121f, 8px 8px 0 #000; margin-bottom:14px;
+  }
+  .overlay p{ font-size:18px; line-height:1.7; color:#9be7ff; margin-bottom:26px;}
+  .big-btn{
+    font-family:inherit; font-size:26px; font-weight:bold; letter-spacing:2px;
+    padding:16px 44px; color:#111; background:#3bff6e;
+    border:5px solid #fff; border-radius:12px;
+    box-shadow:0 8px 0 #0f7a33; cursor:pointer;
+  }
+  .big-btn:active{ transform:translateY(6px); box-shadow:0 2px 0 #0f7a33; }
+  #result-title.crash{ color:#ff4d4d; text-shadow:4px 4px 0 #550000, 8px 8px 0 #000;}
+  #result-title.win{ color:#3bff6e; text-shadow:4px 4px 0 #0a5c26, 8px 8px 0 #000;}
+  .hidden{ display:none !important; }
+  @media (max-width:600px){
+    .tbtn{ width:44vw; max-width:190px; height:96px; font-size:46px;}
+    .overlay h1{ font-size:34px;}
+  }
+</style>
+</head>
+<body>
+<div id="game-container">
+  <canvas id="game"></canvas>
+
+  <div id="hud">
+    <div class="hud-box fuel-wrap">
+      <div class="fuel-label">⛽ ТОПЛИВО</div>
+      <div class="fuel-bar-bg"><div id="fuel-bar"></div></div>
+    </div>
+    <div class="hud-box" style="text-align:right">
+      <div id="dist-text">ФИНИШ: 2000 м</div>
+      <div id="speed-text">СКОРОСТЬ: --</div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <button class="tbtn" id="btn-left">◀</button>
+    <button class="tbtn" id="btn-right">▶</button>
+  </div>
+
+  <div class="overlay" id="start-screen">
+    <h1>РЕТРО<br>ГОНКИ 80-х</h1>
+    <p>Обгоняй машины, собирай канистры ⛽,<br>объезжай масляные лужи 🛢 и успей<br>доехать до финиша пока не кончился бензин!</p>
+    <button class="big-btn" id="btn-start">СТАРТ ►</button>
+  </div>
+
+  <div class="overlay hidden" id="result-screen">
+    <h1 id="result-title">ИГРА ОКОНЧЕНА</h1>
+    <p id="result-text"></p>
+    <button class="big-btn" id="btn-restart">ЕЩЁ РАЗ ⟳</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   РЕТРО ГОНКИ 80-х — Road Fighter style, tablet touch game
+   ============================================================ */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// ---- logical game size (portrait) ----
+const GW = 480, GH = 800;
+let scale = 1;
+
+function resize(){
+  const cw = window.innerWidth, ch = window.innerHeight;
+  scale = Math.min(cw / GW, ch / GH);
+  canvas.width  = Math.round(GW * scale);
+  canvas.height = Math.round(GH * scale);
+  canvas.style.width  = canvas.width + 'px';
+  canvas.style.height = canvas.style.height + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---- road geometry ----
+const ROAD_X = 60, ROAD_W = GW - 120;          // asphalt area
+const LANES = 4;
+const LANE_W = ROAD_W / LANES;
+const TOTAL_DIST = 2000;                        // meters to finish
+const MAX_SPEED = 14;                           // px/frame scroll at full speed
+const BASE_SPEED = 7;
+
+// ---- state ----
+let state = 'menu'; // menu | play | over | win
+let player, traffic, oils, cans, scenery;
+let dist, fuel, speed, oilTimer, shakeT, roadOffset, stripeOffset;
+let spawnT, canT, oilT, frame, slideDir;
+
+function resetGame(){
+  player = { x: GW/2, w: 46, h: 80, vx: 0 };
+  traffic = []; oils = []; cans = []; scenery = [];
+  dist = 0; fuel = 100; speed = BASE_SPEED;
+  oilTimer = 0; shakeT = 0; roadOffset = 0; stripeOffset = 0; slideDir = 0;
+  spawnT = 30; canT = 90; oilT = 200; frame = 0;
+  for(let y=-100;y<GH;y+=140){           // roadside trees/bushes
+    scenery.push({y:y, side:-1, c:Math.random()});
+    scenery.push({y:y+70, side:1, c:Math.random()});
+  }
+}
+
+// ---- input (touch only) ----
+const input = { left:false, right:false };
+function bindBtn(id, key){
+  const el = document.getElementById(id);
+  const on  = e => { e.preventDefault(); input[key]=true;  el.classList.add('pressed'); };
+  const off = e => { e.preventDefault(); input[key]=false; el.classList.remove('pressed'); };
+  el.addEventListener('touchstart', on, {passive:false});
+  el.addEventListener('touchend', off);
+  el.addEventListener('touchcancel', off);
+  el.addEventListener('mousedown', on);   // desktop testing fallback
+  el.addEventListener('mouseup', off);
+  el.addEventListener('mouseleave', off);
+}
+bindBtn('btn-left','left');
+bindBtn('btn-right','right');
+
+document.getElementById('btn-start').addEventListener('click', startPlay);
+document.getElementById('btn-restart').addEventListener('click', startPlay);
+function startPlay(e){
+  if(e) e.preventDefault();
+  resetGame();
+  state='play';
+  document.getElementById('start-screen').classList.add('hidden');
+  document.getElementById('result-screen').classList.add('hidden');
+}
+
+// ---- helpers ----
+const laneCenter = i => ROAD_X + LANE_W*i + LANE_W/2;
+function rectsOverlap(a,b){
+  return a.x-a.w/2 < b.x+b.w/2 && a.x+a.w/2 > b.x-b.w/2 &&
+         a.y-a.h/2 < b.y+b.h/2 && a.y+a.h/2 > b.y-b.h/2;
+}
+
+// ---- spawning ----
+function spawnTraffic(){
+  const lane = Math.floor(Math.random()*LANES);
+  const colors = ['#3ec6ff','#ffd23e','#7bff5c','#ff7bd5','#ffffff'];
+  // avoid stacking on existing near-spawn car in same lane
+  for(const t of traffic) if(t.lane===lane && t.y<160) return;
+  traffic.push({
+    x: laneCenter(lane), y:-90, w:44, h:76,
+    lane, spd: 2.2 + Math.random()*2.2,
+    color: colors[Math.floor(Math.random()*colors.length)]
+  });
+}
+function spawnOil(){
+  const lane = Math.floor(Math.random()*LANES);
+  oils.push({x: laneCenter(lane)+(Math.random()*30-15), y:-70, r:34});
+}
+function spawnCan(){
+  const lane = Math.floor(Math.random()*LANES);
+  cans.push({x: laneCenter(lane), y:-60, w:30, h:38, bob:Math.random()*6.28});
+}
+
+// ---- update ----
+function update(){
+  frame++;
+
+  // speed rises gradually with distance travelled
+  const target = BASE_SPEED + (MAX_SPEED-BASE_SPEED)*Math.min(1, dist/TOTAL_DIST*0.8);
+  speed += (target-speed)*0.02;
+
+  // steering
+  let steer = 0;
+  if(input.left)  steer -= 1;
+  if(input.right) steer += 1;
+
+  if(oilTimer > 0){
+    // ON OIL: hard to control — car slides & spins
+    oilTimer--;
+    if(frame % 12 === 0) slideDir = (Math.random()-0.5)*7;   // sudden sideways skid
+    player.vx += (slideDir - player.vx)*0.06 + steer*0.28;   // weak steering response
+    player.vx *= 0.97;
+    player.vx = Math.max(-8, Math.min(8, player.vx));
+    player.x += player.vx;
+    player.spin += 0.30 + Math.abs(player.vx)*0.04;          // spinning sprite
+    shakeT = 4;
+  } else {
+    player.spin = 0;
+    const acc = 0.9;
+    player.vx = steer*acc*7;                               // direct responsive feel
+    player.x += player.vx;
+  }
+
+  // clamp to road edges (with slight bounce)
+  const minX = ROAD_X + player.w/2 + 4, maxX = ROAD_X+ROAD_W - player.w/2 - 4;
+  if(player.x < minX){ player.x = minX; player.vx = Math.abs(player.vx)*0.4; }
+  if(player.x > maxX){ player.x = maxX; player.vx = -Math.abs(player.vx)*0.4; }
+
+  // world scroll
+  roadOffset   = (roadOffset + speed) % 80;
+  stripeOffset = (stripeOffset + speed);
+  dist += speed * 0.06;                                    // m per frame approx
+  fuel -= speed * 0.011;                                   // burn rate → ~ needs cans
+
+  // scenery
+  for(const s of scenery){ s.y += speed*0.9; if(s.y>GH+60){ s.y-=GH+200; s.c=Math.random(); } }
+
+  // spawns
+  if(--spawnT<=0){ spawnTraffic(); spawnT = Math.max(28, 70 - dist/40); }
+  if(--oilT<=0)  { spawnOil();      oilT  = 240 + Math.random()*200; }
+  if(--canT<=0)  { spawnCan();      canT  = 170 + Math.random()*160; }
+
+  // move traffic
+  for(const t of traffic){ t.y += speed - t.spd; }
+  traffic = traffic.filter(t => t.y < GH+120);
+
+  for(const o of oils){ o.y += speed; }
+  oils = oils.filter(o => o.y < GH+80);
+
+  for(const c of cans){ c.y += speed; c.bob += 0.2; }
+
+  // ---- collisions ----
+  const P = {x:player.x, y:GH-140, w:player.w, h:player.h};
+  for(const t of traffic){
+    if(rectsOverlap(P,t)){ crash(); return; }
+  }
+  for(let i=oils.length-1;i>=0;i--){
+    const o = oils[i];
+    if(Math.abs(o.x-P.x)<o.r+P.w/2-8 && Math.abs(o.y-P.y)<o.r+P.h/2-14){
+      oils.splice(i,1); oilTimer = 70;                    // slide/spin for ~1.2s
+    }
+  }
+  for(let i=cans.length-1;i>=0;i--){
+    const c = cans[i];
+    if(rectsOverlap(P,c)){
+      cans.splice(i,1);
+      fuel = Math.min(100, fuel + 22);
+      flashCan = 12;
+    }
+  }
+
+  // ---- end conditions ----
+  if(fuel <= 0){ fuel=0; loseFuel(); return; }
+  if(dist >= TOTAL_DIST){ win(); return; }
+
+  if(shakeT>0) shakeT--;
+  if(flashCan>0) flashCan--;
+  updateHUD();
+}
+
+let flashCan = 0;
+
+function crash(){ shakeT=25; state='over';
+  showResult('💥 АВАРИЯ!', 'Ты врезался в машину! Пройдено: '+Math.floor(dist)+' м', 'crash');
+}
+function loseFuel(){ state='over';
+  showResult('⛽ БАК ПУСТ!', 'Бензин закончился в '+Math.floor(TOTAL_DIST-dist)+' метрах от финиша.', 'crash');
+}
+function win(){ state='win';
+  showResult('🏁 ФИНИШ!', 'Отличная гонка! Ты доехал до финиша!', 'win');
+}
+function showResult(title, text, cls){
+  const t = document.getElementById('result-title');
+  t.textContent = title; t.className = cls;
+  document.getElementById('result-text').textContent = text;
+  document.getElementById('result-screen').classList.remove('hidden');
+}
+function updateHUD(){
+  document.getElementById('fuel-bar').style.width = fuel + '%';
+  document.getElementById('dist-text').textContent = 'ФИНИШ: ' + Math.max(0, Math.ceil(TOTAL_DIST-dist)) + ' м';
+  document.getElementById('speed-text').textContent = 'СКОРОСТЬ: ' + Math.round(speed*18) + ' км/ч';
+}
+
+// ============================================================
+//                          DRAWING
+// ============================================================
+function draw(){
+  ctx.save();
+  ctx.scale(scale, scale);
+  if(shakeT>0) ctx.translate((Math.random()-0.5)*shakeT*0.6,(Math.random()-0.5)*shakeT*0.6);
+
+  drawRoad();
+  for(const o of oils) drawOil(o);
+  for(const c of cans) drawCan(c);
+  for(const t of traffic) drawCar(t.x, t.y, t.color, 0);
+  drawPlayer();
+  drawFinishLine();
+
+  ctx.restore();
+}
+
+function drawRoad(){
+  // grass sides
+  ctx.fillStyle = '#0f9d3a'; ctx.fillRect(0,0,GW,GH);
+  // retro grass stripes
+  ctx.fillStyle = '#0c7f2f';
+  for(let i=0;i<12;i++){
+    const y = ((i*80 + roadOffset*1.0) % (GH+80)) - 80;
+    ctx.fillRect(0,y,ROAD_X-14,40);
+    ctx.fillRect(GW-ROAD_X+14,y,ROAD_X-14,40);
+  }
+  // rumble strips (red/white curbs)
+  for(let i=0;i<12;i++){
+    const y = ((i*80 + roadOffset) % (GH+80)) - 80;
+    ctx.fillStyle = '#e8e8e8'; ctx.fillRect(ROAD_X-14,y,14,80); ctx.fillRect(ROAD_X+ROAD_W,y,14,80);
+    ctx.fillStyle = '#e02020'; ctx.fillRect(ROAD_X-14,y,14,40); ctx.fillRect(ROAD_X+ROAD_W,y+40,14,40);
+  }
+  // asphalt
+  ctx.fillStyle = '#3a3a44'; ctx.fillRect(ROAD_X,0,ROAD_W,GH);
+  // subtle asphalt texture lines
+  ctx.fillStyle = 'rgba(255,255,255,0.03)';
+  for(let i=0;i<10;i++){
+    const y=((i*90+stripeOffset*0.5)%(GH+90))-90;
+    ctx.fillRect(ROAD_X,y,ROAD_W,3);
+  }
+  // dashed lane markings
+  ctx.fillStyle = '#ffe14d';
+  for(let l=1;l<LANES;l++){
+    const x = ROAD_X + LANE_W*l - 3;
+    for(let i=0;i<11;i++){
+      const y = ((i*80 + roadOffset) % (GH+80)) - 80;
+      ctx.fillRect(x, y, 6, 44);
+    }
+  }
+  // white edge lines
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(ROAD_X+4,0,5,GH); ctx.fillRect(ROAD_X+ROAD_W-9,0,5,GH);
+  // roadside bushes
+  for(const s of scenery){
+    const x = s.side<0 ? 26 : GW-26;
+    ctx.fillStyle = s.c>0.5 ? '#065f1f' : '#15b04a';
+    ctx.beginPath(); ctx.arc(x, s.y, 16+s.c*8, 0, 6.29); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.25)';
+    ctx.beginPath(); ctx.arc(x-4, s.y-5, 5, 0, 6.29); ctx.fill();
+  }
+}
+
+function drawCar(x,y,color,spin){
+  ctx.save(); ctx.translate(x,y); if(spin) ctx.rotate(spin);
+  const w=44,h=78;
+  // shadow
+  ctx.fillStyle='rgba(0,0,0,.35)'; ctx.fillRect(-w/2+4,-h/2+6,w,h);
+  // body
+  ctx.fillStyle=color; roundRect(-w/2,-h/2,w,h,9); ctx.fill();
+  // hood highlight
+  ctx.fillStyle='rgba(255,255,255,.28)'; roundRect(-w/2+5,-h/2+5,w-10,18,6); ctx.fill();
+  // windshield
+  ctx.fillStyle='#1b2b4a'; roundRect(-w/2+6,-h/2+24,w-12,14,4); ctx.fill();
+  // roof
+  ctx.fillStyle=shade(color,-25); roundRect(-w/2+6,-h/2+40,w-12,16,4); ctx.fill();
+  // rear window
+  ctx.fillStyle='#1b2b4a'; roundRect(-w/2+6,-h/2+57,w-12,10,3); ctx.fill();
+  // wheels
+  ctx.fillStyle='#111';
+  ctx.fillRect(-w/2-4,-h/2+8,6,18); ctx.fillRect(w/2-2,-h/2+8,6,18);
+  ctx.fillRect(-w/2-4,h/2-26,6,18); ctx.fillRect(w/2-2,h/2-26,6,18);
+  // tail lights
+  ctx.fillStyle='#ff2222'; ctx.fillRect(-w/2+4,h/2-6,10,4); ctx.fillRect(w/2-14,h/2-6,10,4);
+  ctx.restore();
+}
+
+function drawPlayer(){
+  const spin = player.spin || 0;
+  drawCar(player.x, GH-140, '#e81224', spin);
+  // headlights glow when moving fast
+  ctx.fillStyle='rgba(255,240,150,.18)';
+  ctx.beginPath();
+  ctx.moveTo(player.x-16, GH-180); ctx.lineTo(player.x-30, GH-240);
+  ctx.lineTo(player.x-2, GH-240); ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(player.x+16, GH-180); ctx.lineTo(player.x+30, GH-240);
+  ctx.lineTo(player.x+2, GH-240); ctx.closePath(); ctx.fill();
+  // "OIL!" warning
+  if(oilTimer>0 && Math.floor(frame/6)%2===0){
+    ctx.fillStyle='#ffe14d'; ctx.font='bold 26px Courier New'; ctx.textAlign='center';
+    ctx.fillText('МАСЛО! 🌀', player.x, GH-210);
+  }
+  if(flashCan>0){
+    ctx.fillStyle='#3bff6e'; ctx.font='bold 24px Courier New'; ctx.textAlign='center';
+    ctx.fillText('+ТОПЛИВО', player.x, GH-230);
+  }
+}
+
+function drawOil(o){
+  ctx.save(); ctx.translate(o.x,o.y);
+  ctx.fillStyle='rgba(10,10,14,.92)';
+  ctx.beginPath(); ctx.ellipse(0,0,o.r,o.r*0.62,0.3,0,6.29); ctx.fill();
+  ctx.fillStyle='rgba(90,60,140,.5)';
+  ctx.beginPath(); ctx.ellipse(-6,-4,o.r*0.45,o.r*0.25,0.3,0,6.29); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.25)';
+  ctx.beginPath(); ctx.ellipse(8,6,6,3,0.4,0,6.29); ctx.fill();
+  ctx.restore();
+}
+
+function drawCan(c){
+  ctx.save();
+  ctx.translate(c.x, c.y + Math.sin(c.bob)*3);
+  // glow
+  ctx.fillStyle='rgba(255,210,60,.25)';
+  ctx.beginPath(); ctx.arc(0,0,26,0,6.29); ctx.fill();
+  // jerry can body
+  ctx.fillStyle='#d81e1e'; roundRect(-14,-18,28,36,5); ctx.fill();
+  ctx.strokeStyle='#7d0d0d'; ctx.lineWidth=2; roundRect(-14,-18,28,36,5); ctx.stroke();
+  // handle
+  ctx.fillStyle='#7d0d0d'; ctx.fillRect(-8,-24,16,7);
+  ctx.fillStyle='#d81e1e'; ctx.fillRect(-5,-21,10,4);
+  // cap
+  ctx.fillStyle='#ffd23e'; ctx.fillRect(6,-24,7,7);
+  // FUEL label
+  ctx.fillStyle='#ffe14d'; ctx.font='bold 13px Courier New'; ctx.textAlign='center';
+  ctx.fillText('⛽',0,6);
+  ctx.restore();
+}
+
+function drawFinishLine(){
+  const remain = TOTAL_DIST - dist;
+  if(remain < 120){
+    // checkered band scrolls down toward the player like everything else
+    const fy = GH - (remain * 4.5);
+    const sq=20;
+    for(let r=0;r<2;r++)for(let i=0;i<Math.ceil(ROAD_W/sq);i++){
+      ctx.fillStyle=(i+r)%2? '#111':'#fff';
+      ctx.fillRect(ROAD_X+i*sq, fy+r*sq, Math.min(sq, ROAD_X+ROAD_W-(ROAD_X+i*sq)), sq);
+    }
+    ctx.fillStyle='#ffdd33'; ctx.font='bold 30px Courier New'; ctx.textAlign='center';
+    ctx.fillText('ФИНИШ 🏁', GW/2, fy-14);
+  }
+}
+
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function shade(hex,amt){
+  const n=parseInt(hex.slice(1),16);
+  let r=(n>>16)+amt,g=((n>>8)&255)+amt,b=(n&255)+amt;
+  r=Math.max(0,Math.min(255,r));g=Math.max(0,Math.min(255,g));b=Math.max(0,Math.min(255,b));
+  return `rgb(${r},${g},${b})`;
+}
+
+// ============================================================
+//                         GAME LOOP
+// ============================================================
+function loop(){
+  if(state==='play') update();
+  if(state==='play' || state==='over' || state==='win'){
+    if(!player) resetGame();
+    draw();
+  } else {
+    // menu background: idle animated road (drawn scaled like gameplay)
+    if(!player) resetGame();
+    roadOffset=(roadOffset+4)%80; stripeOffset+=4; frame++;
+    for(const s of scenery){ s.y+=3.6; if(s.y>GH+60){s.y-=GH+200;s.c=Math.random();} }
+    ctx.save(); ctx.scale(scale, scale);
+    drawRoad();
+    ctx.restore();
+  }
+  requestAnimationFrame(loop);
+}
+resetGame();
+loop();
+</script>
+</body>
+</html>
